@@ -85,6 +85,14 @@ var Faceplate = function(options) {
   }
 }
 
+var safeCB = function (cb) {
+
+  if (typeof cb === 'function') {
+    return (cb.length === 1) ?  function(err, data) { cb(data); } : cb;
+  }
+
+}
+
 var FaceplateSession = function(plate, signed_request) {
 
   var self = this;
@@ -96,18 +104,22 @@ var FaceplateSession = function(plate, signed_request) {
   }
 
   this.app = function(cb) {
+    var _cb = safeCB(cb);
+
     self.get('/' + self.plate.app_id, function(err, app) {
-      cb(app);
+      _cb(err,app);
     });
   }
 
   this.me = function(cb) {
+    var _cb = safeCB(cb);
+
     if (self.token) {
       self.get('/me', function(err, me) {
-        cb(me);
+        _cb(err, me);
       });
     } else {
-      cb();
+      _cb();
     }
   }
 
@@ -117,16 +129,18 @@ var FaceplateSession = function(plate, signed_request) {
       params = {};
     }
 
+    var _cb = safeCB(cb);
+
     if (self.token)
       params.access_token = self.token;
 
     try {
       restler.get('https://graph.facebook.com' + path, { query: params }).on('complete', function(data) {
         var result = JSON.parse(data);
-        cb(null, result);
+        _cb(null,result);
       });
     } catch (err) {
-      cb(err);
+      _cb(err);
     }
   }
 
@@ -134,30 +148,43 @@ var FaceplateSession = function(plate, signed_request) {
     var params = { access_token: self.token, format:'json' };
     var method;
     var onComplete;
+    var _cb = safeCB(cb);
 
     if (typeof query == 'string') {
       method = 'fql.query';
       params.query = query;
-      onComplete = cb;
+      onComplete = function(data, res) {
+
+        if (res.statusCode !== 200) {
+          _cb(res,null);
+        } else {
+          _cb(null, data);
+        }
+
+      };
     }
     else {
       method = 'fql.multiquery';
       params.queries = JSON.stringify(query);
       onComplete = function(res) {
         if (res.error_code)
-          return cb(res);
+          return _cb(res);
 
         var data = {};
         res.forEach(function(q) {
           data[q.name] = q.fql_result_set;
         });
-        cb(data);
+
+        _cb(null, data);
+
       };
     }
     restler.get('https://api.facebook.com/method/'+method, { query: params }).on('complete', onComplete);
   }
 
   this.post = function (params, cb) {
+    var _cb = safeCB(cb);
+
     restler.post(
       'https://graph.facebook.com/me/feed',
       {
@@ -165,9 +192,13 @@ var FaceplateSession = function(plate, signed_request) {
           access_token:self.token
         },
         data: params
-      }).on('complete', function (data) {
-        var result = JSON.parse(data);
-        cb(result.data ? result.data : result);
+      }).on('complete', function (data, response) {
+        if (data && response.statusCode === 200) {
+          var result = JSON.parse(data);
+          _cb(null,result.data ? result.data : result);
+        } else {
+          _cb(response,data);
+        }
       });
   }
 }
